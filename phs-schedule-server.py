@@ -10,14 +10,77 @@ import re
 import pandas as pd
 import lxml
 from tabulate import tabulate
+from  jsonmerge import merge
 
+# from flask_pushjack import FlaskAPNS
+# from flask_pushjack import FlaskGCM
+#
+# config = {
+#     'APNS_CERTIFICATE': '<path/to/certificate.pem>',
+#     'GCM_API_KEY': '<api-key>'
+# }
 
 app = Flask(__name__)
-
+# app.config.update(config)
 
 @app.route('/')
 def webResponse():
     return 'PHS Scheduler'
+
+@app.route('/getInfo', methods=['POST'])
+def getInfo():
+    username = request.headers.get('username')
+    ldappassword = request.headers.get('ldappassword')
+    pw = request.headers.get('pw')
+    dbpw = request.headers.get('dbpw')
+
+    url = 'https://pschool.princetonk12.org/public/home.html'
+    rses = requests.Session()
+    lp = rses.get(url)
+    fd = Session._Session__form_data(lp.text, 'LoginForm', {
+        'account': username,
+        'pw': pw,
+        'ldappassword': ldappassword,
+        'dbpw': dbpw,
+    }, form_url=url)
+    rses.post(fd.post_url, data=fd.params)
+
+    text = rses.get('https://pschool.princetonk12.org/guardian/home.html').text
+    soup = BeautifulSoup(text, 'html.parser')
+    tools = soup.find('ul', attrs={'id': 'tools'})
+    date = tools.find_all('li')[1]
+    match = re.search(r'\(([A-G])\)', date.text)
+    if match:
+        letterDay =  match.group(1)
+    else:
+        letterDay = 'No school today'
+
+    text = rses.get('https://pschool.princetonk12.org/guardian/appstudentsched.html').content
+    soup = BeautifulSoup(text,'lxml')
+    table = soup.find_all('table')[0]
+    df = pd.read_html(str(table))
+    currentYear = (df[0].to_json(orient='records'))
+
+    text = rses.get('https://pschool.princetonk12.org/guardian/appstudentbellsched.html').content
+    soup = BeautifulSoup(text,'lxml')
+    table = soup.find_all('table')[0]
+    df = pd.read_html(str(table))
+    weekly = (df[0].to_json(orient='records'))
+
+
+    text = rses.get('https://pschool.princetonk12.org/guardian/appstudentmatrixsched.html').content
+    soup = BeautifulSoup(text,'lxml')
+    table = soup.find_all('table')[0]
+    df = pd.read_html(str(table))
+    matrix = (df[0].to_json(orient='records'))
+
+    print('LetterDay', letterDay)
+    print('currentYear', currentYear)
+    print('weekly', weekly)
+    print('matrix', matrix)
+    all = {"Letter Day": letterDay, "CurrentYear": currentYear, "weekly": weekly, "matrix": matrix}
+    return jsonify(all)
+
 
 @app.route('/getSchedule', methods=['POST'])
 def getSchedule():
@@ -40,26 +103,34 @@ def getSchedule():
     rses.post(fd.post_url, data=fd.params)
 
     if schedFormat == 'currentYear':
-        text = rses.get('https://pschool.princetonk12.org/guardian/studentsched.html').content
+        text = rses.get('https://pschool.princetonk12.org/guardian/appstudentsched.html').content
     elif schedFormat == 'weekly':
-        text = rses.get('https://pschool.princetonk12.org/guardian/studentbellsched.html').content
+        text = rses.get('https://pschool.princetonk12.org/guardian/appstudentbellsched.html').content
     elif schedFormat == 'matrix':
-        text = rses.get('https://pschool.princetonk12.org/guardian/studentmatrixsched.html').content
+        text = rses.get('https://pschool.princetonk12.org/guardian/appstudentmatrixsched.html').content
     else:
         return 'Invalid schedule type, try currentYear, weekly, or matrix'
-
+    print('ldappassword', ldappassword)
+    print('pw', pw)
+    print('dbpw', dbpw)
+    print('format', schedFormat)
     soup = BeautifulSoup(text,'lxml')
     table = soup.find_all('table')[0]
     df = pd.read_html(str(table))
 
     return jsonify(df[0].to_json(orient='records'))
+    #
+    # soup = BeautifulSoup(text,'lxml')
+    # table = soup.find_all('table')[0]
+    # df = pd.read_html(str(table))
+    # print(tabulate(df[0], headers='keys', tablefmt='psql'))
+    # return tabulate(df[0], headers='keys', tablefmt='psql')
 
 @app.route('/getLetterDay', methods=['POST'])
 def getLetterDay():
     url = 'https://pschool.princetonk12.org/public/home.html'
     rses = requests.Session()
     lp = rses.get(url)
-
     username = request.headers.get('username')
     ldappassword = request.headers.get('ldappassword')
     pw = request.headers.get('pw')
